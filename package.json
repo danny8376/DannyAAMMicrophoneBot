@@ -1,0 +1,16 @@
+{
+  "name": "dannyaammicrophonebot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "bot.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "DannyAAM",
+  "license": "MIT",
+  "dependencies": {
+    "@discordjs/opus": "^0.5.0",
+    "eris": "^0.15.0",
+    "string-argv": "^0.3.1"
+  }
+}

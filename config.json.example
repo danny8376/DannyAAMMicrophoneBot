@@ -1,0 +1,9 @@
+{
+  "invite": "https://discordapp.com/oauth2/authorize?client_id=<appid>&permissions=3148800&scope=bot",
+  "token": "<apptoken>",
+  "vbanIn": {
+    "address": "127.0.0.1",
+    "port": "56981"
+  },
+  "prefix": "mic!"
+}
