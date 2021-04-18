@@ -37,7 +37,7 @@ vbanServer.on("message", (msg, rinfo) => {
                     vbanStream = new Readable();
                     vbanStream._read = () => { vbanStreamReading = true };
                 }
-                if (vbanStreamReading) vbanStream.push(data.audio);
+                if (vbanStreamReading) vbanStreamReading = vbanStream.push(data.audio);
             } else { // invalid format -> clear it
                 vbanStreamName = "";
                 vbanStream = null;
@@ -164,10 +164,13 @@ const commands = {
             if (vbanStream) {
                 const conv = new PCMOpusTransformer({
                     opusFactory: connection.piper.opusFactory,
-                    frameSize: 960,
+                    frameSize: 960, // 20ms @ 48kHz
                     pcmSize: 3840
                 });
-                connection.play(vbanStream.pipe(conv), { format: "opusPackets" });
+                connection.play(vbanStream.pipe(conv), {
+                    format: "opusPackets",
+                    voiceDataTimeout: -1
+                });
             }
             if (vbanOut) {
                 vbanClient = dgram.createSocket("udp4");
