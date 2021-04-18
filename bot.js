@@ -12,47 +12,41 @@ const config = require("./config.json");
 
 // ==== VBAN ====
 
-let vbanClient = null;
-
-const vbanServer = dgram.createSocket("udp4");
-let vbanStreamList = new Set();
-let vbanStreamName = "";
-let vbanStream = null;
-let vbanStreamReading = false;
-
-setInterval(() => {
-    vbanStreamList.clear();
-}, 60000);
-
-vbanServer.on("message", (msg, rinfo) => {
-    //if (vbanStreamName === "") return;
-    const data = proccessPacket(msg);
-    if (data.header.sp === 0) {
-        vbanStreamList.add(data.header.streamName);
-        if (data.header.streamName === vbanStreamName) {
-            // As we don't do resampling, and Discord requires stereo 48kHz s16le pcm -> check here
-            if (data.header.nbChannel === 2 && data.header.sr === 48000 && data.header.formatIndex === 1 && data.header.codec === 0) {
-                if (!vbanStream || vbanStream.destroyed) {
-                    vbanStreamReading = false;
-                    vbanStream = new Readable();
-                    vbanStream._read = () => { vbanStreamReading = true };
+const vbanStream = new Readable({
+    highWaterMark: 0,
+    construct(cb) {
+        this.list = new Set();
+        this.name = "";
+        this.reading = false;
+        this.server = dgram.createSocket("udp4");
+        this.server.on("listening", () => {
+            const address = this.server.address();
+            console.log(`VBAN server listening ${address.address}:${address.port}`);
+        });
+        this.server.on("message", (msg, rinfo) => {
+            //if (this.name === "") return;
+            const data = proccessPacket(msg);
+            if (data.header.sp === 0) {
+                this.list.add(data.header.streamName);
+                if (data.header.streamName === this.name) {
+                    // As we don't do resampling, and Discord requires stereo 48kHz s16le pcm -> check here
+                    if (data.header.nbChannel === 2 && data.header.sr === 48000 && data.header.formatIndex === 1 && data.header.codec === 0) {
+                        if (this.reading) {
+                           this.reading = this.push(data.audio);
+                        }
+                    } else { // invalid format -> clear it
+                        this.name = "";
+                    }
                 }
-                if (vbanStreamReading) vbanStreamReading = vbanStream.push(data.audio);
-            } else { // invalid format -> clear it
-                vbanStreamName = "";
-                vbanStream = null;
-                vbanStreamReading = false;
             }
-        }
+        });
+        this.server.bind(config.vbanIn);
+        cb();
+    },
+    read(size) {
+        this.reading = true;
     }
 });
-
-vbanServer.on("listening", () => {
-    const address = vbanServer.address();
-    console.log(`VBAN server listening ${address.address}:${address.port}`);
-});
-
-vbanServer.bind(config.vbanIn);
 
 
 
@@ -62,7 +56,7 @@ vbanServer.bind(config.vbanIn);
 const bot = new Eris(config.token);
 console.log("Starting bot...");
 
-let vbanOut = null;
+let feedVbanOut = null;
 
 const commands = {
     help: [
@@ -84,26 +78,54 @@ const commands = {
     vbaninlist: [
         "List possible input stream name",
         (msg, args) => {
-            msg.channel.createMessage(`Available streams: ${Array.from(vbanStreamList).join(", ")}`);
+            msg.channel.createMessage(`Available streams: ${Array.from(vbanStream.list).join(", ")}`);
         }
     ],
     vbanin: [
         "Configure VBAN input stream name",
         (msg, args) => {
-            [vbanStreamName] = args;
-            if (vbanStream) vbanStream.destroy();
-            msg.channel.createMessage(`Input stream selected: ${vbanStreamName}`);
+            [vbanStream.name] = args;
+            msg.channel.createMessage(`Input stream selected: ${vbanStream.name}`);
         }
     ],
     vbanout: [
         "Configure VBAN output stream ( args: <host> <port> <streamName> )",
         (msg, args) => {
             [host, port, name] = args;
-            vbanOut = {
-                host,
-                port,
-                name
-            }
+
+            if (feedVbanOut) feedVbanOut.close();
+
+            const client = dgram.createSocket("udp4");
+            client.on("connect", () => {
+                const conv = new PCMVBANTransformer({
+                    streamName: name
+                });
+                conv.on("data", (chunk) => {
+                    client.send(chunk);
+                });
+                const wrapper = new Readable({
+                    highWaterMark: 0,
+                    construct(cb) {
+                        this.reading = false;
+                        feedVbanOut = (data) => {
+                            if (this.reading) this.reading = this.push(data);
+                        };
+                        feedVbanOut.close = () => {
+                            wrapper.destroy();
+                            conv.destroy();
+                            client.close();
+                            feedVbanOut = null;
+                        };
+                        cb();
+                    },
+                    read(size) {
+                        this.reading = true
+                    }
+                });
+                wrapper.pipe(conv);
+            });
+            client.connect(port, host);
+
             msg.channel.createMessage(`Output stream set: ${host}:${port} ${name}`);
         }
     ],
@@ -119,11 +141,6 @@ const commands = {
             const voiceChannelID = await msg.member.voiceState.channelID;
             if (voiceChannelID) {
                 bot.getChannel(voiceChannelID).leave()
-                if (vbanStream) vbanStream.destroy();
-                if (vbanClient) {
-                    vbanClient.close();
-                    vbanClient = null;
-                }
                 msg.channel.createMessage(":loudspeaker:  |  **Successfully left!**");
             } else {
                 msg.channel.createMessage(":warning:  |  **Not currently in a voice channel.**");
@@ -155,42 +172,26 @@ const commands = {
             msg.channel.createMessage(":warning:  |  **Not permit to join in this channel.**");
             return;
         }
-        if (!vbanStream && !vbanOut) {
-            msg.channel.createMessage(":warning:  |  **no VBAN not configed.**");
-            return;
-        }
         voiceChannel.join().then(connection => {
             msg.channel.createMessage(":loudspeaker:  |  **Successfully joined!**");
-            if (vbanStream) {
-                const conv = new PCMOpusTransformer({
-                    opusFactory: connection.piper.opusFactory,
-                    frameSize: 960, // 20ms @ 48kHz
-                    pcmSize: 3840
-                });
-                connection.play(vbanStream.pipe(conv), {
-                    format: "opusPackets",
-                    voiceDataTimeout: -1
-                });
-            }
-            if (vbanOut) {
-                vbanClient = dgram.createSocket("udp4");
-                vbanClient.on("connect", () => {
-                    const conv = new PCMVBANTransformer({
-                        streamName: vbanOut.name
-                    });
-                    conv.on("data", (chunk) => {
-                        vbanClient.send(chunk);
-                    });
-                    const dcStream = connection.receive("pcm");
-                    const inStream = new Readable();
-                    inStream._read = () => { };
-                    dcStream.on("data", (data, userID, timestamp, sequence) => {
-                        inStream.push(data);
-                    });
-                    inStream.pipe(conv);
-                });
-                vbanClient.connect(vbanOut.port, vbanOut.host);
-            }
+
+            const conv = new PCMOpusTransformer({
+                opusFactory: connection.piper.opusFactory,
+                frameSize: 960, // 20ms @ 48kHz
+                pcmSize: 3840
+            });
+            connection.on("end", () => {
+                vbanStream.unpipe(conv);
+            });
+            connection.play(vbanStream.pipe(conv), {
+                format: "opusPackets",
+                voiceDataTimeout: -1
+            });
+
+            connection.receive("pcm").on("data", (data, userID, timestamp, sequence) => {
+                if (feedVbanOut) feedVbanOut(data);
+            });
+
             return;
         })
         .catch(err => {
