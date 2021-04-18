@@ -116,7 +116,7 @@ const commands = {
     leave: [
         "Leave voice channel",
         async (msg, args) => {
-            const voiceChannelID = await msg.member.voiceState.channelID
+            const voiceChannelID = await msg.member.voiceState.channelID;
             if (voiceChannelID) {
                 bot.getChannel(voiceChannelID).leave()
                 if (vbanStream) vbanStream.destroy();
@@ -151,7 +151,7 @@ const commands = {
             msg.channel.createMessage(":warning:  |  **I'm lready in another channel in this server. Leave me first.**");
             return;
         }
-        if (!voiceChannel.permissionsOf(msg.member).json.voiceConnect) {
+        if (!voiceChannel.permissionsOf(bot.user.id).json.voiceConnect) {
             msg.channel.createMessage(":warning:  |  **Not permit to join in this channel.**");
             return;
         }
@@ -213,7 +213,9 @@ bot.on("messageCreate", (msg) => {
         const cmd = args.shift();
         const dat = commands[cmd.slice(config.prefix.length)];
         if (dat !== undefined) {
-            dat[1](msg, args);
+            if (config.userList.includes(msg.member.id)) {
+                dat[1](msg, args);
+            }
         } else {
             let str = cmd.replace('`', '') || "none";
             msg.channel.createMessage(":warning:  |  **The command** `" + str + "` **don't exist, for more help use** `" + config.prefix + "help`");
