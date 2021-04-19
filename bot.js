@@ -132,7 +132,8 @@ const commands = {
     join: [
         "Join to your current channel",
         (msg, args) => {
-            commands.joinChannel(msg);
+            [voiceChannelID] = args
+            commands.joinChannel(msg, voiceChannelID);
         }
     ],
     leave: [
@@ -153,8 +154,8 @@ const commands = {
             msg.channel.createMessage(":tickets:  |  **Invite link:** `" + config.invite + "`");
         }
     ],
-    async joinChannel(msg) {
-        const voiceChannelID = await msg.member.voiceState.channelID;
+    async joinChannel(msg, voiceChannelID) {
+        voiceChannelID ||= await msg.member.voiceState.channelID;
         if (!voiceChannelID) {
             msg.channel.createMessage(":warning:  |  **You are not on a voice channel.**");
             return;
