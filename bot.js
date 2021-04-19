@@ -91,7 +91,7 @@ const commands = {
     vbanout: [
         "Configure VBAN output stream ( args: <host> <port> <streamName> )",
         (msg, args) => {
-            [host, port, name] = args;
+            const [host, port, name] = args;
 
             if (feedVbanOut) feedVbanOut.close();
 
@@ -132,7 +132,7 @@ const commands = {
     join: [
         "Join to your current channel",
         (msg, args) => {
-            [voiceChannelID] = args
+            const [voiceChannelID] = args
             commands.joinChannel(msg, voiceChannelID);
         }
     ],
